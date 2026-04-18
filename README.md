@@ -6,7 +6,7 @@
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-blue.svg)](https://www.microsoft.com/windows)
 [![VST3](https://img.shields.io/badge/Plugin%20Format-VST3-orange.svg)](https://www.steinberg.net/vst3/)
 [![JUCE 8](https://img.shields.io/badge/Framework-JUCE%208-green.svg)](https://juce.com/)
-[![Model: MIDI-LLM](https://img.shields.io/badge/Model-MIDI--LLM%20(NeurIPS%202025)-purple.svg)](#model--research)
+[![Model: MIDI-LLM](https://img.shields.io/badge/Model-MIDI--LLM%20(NeurIPS%202025)-purple.svg)](https://github.com/slSeanWU/MIDI-LLM)
 
 ---
 
