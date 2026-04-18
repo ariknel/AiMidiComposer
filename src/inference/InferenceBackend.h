@@ -1,0 +1,66 @@
+#pragma once
+#include <juce_core/juce_core.h>
+#include <functional>
+#include <memory>
+
+namespace AIMC {
+
+/** Abstract inference backend. v1 = Python sidecar over localhost HTTP.
+    v2 could add: embedded llama.cpp, cloud API fallback, etc. */
+class InferenceBackend
+{
+public:
+    virtual ~InferenceBackend() = default;
+
+    /** Readiness is async - backend is "available" when the model is loaded.
+        Poll this before enabling the Generate button. */
+    enum class Status { NotStarted, Starting, DownloadingModel, LoadingModel, Ready, Failed };
+
+    struct StatusUpdate {
+        Status       status = Status::NotStarted;
+        float        progress01 = 0.f;  // 0..1 for download/load progress
+        juce::String message;           // human-readable detail
+    };
+
+    using StatusCallback = std::function<void(const StatusUpdate&)>;
+
+    /** Result of a generation request. `midiBytes` contains a complete multitrack
+        .mid file. Instrument names come from GM program classification done by
+        the sidecar (which already splits the MIDI per-program during inference). */
+    struct GenerationResult {
+        bool                         success = false;
+        juce::String                 errorMessage;
+        juce::MemoryBlock            combinedMidiBytes;
+        juce::String                 detectedKey;
+        juce::String                 detectedTempo;
+        juce::String                 detectedTimeSig;
+        juce::String                 assistantSummary;
+        double                       generationSeconds = 0.0;
+    };
+
+    using ProgressCallback = std::function<void(float progress01, juce::String msg)>;
+    using DoneCallback     = std::function<void(GenerationResult)>;
+
+    /** Kick off the backend (may download/load model). Non-blocking. */
+    virtual void start(StatusCallback onStatus) = 0;
+
+    /** Stop the backend cleanly. */
+    virtual void stop() = 0;
+
+    /** Submit a prompt. Calls `done` on the message thread when complete.
+        `cancelHandle` can be used to cancel if the editor is destroyed. */
+    struct Request {
+        juce::String prompt;
+        float        temperature = 0.9f;
+        float        topP        = 0.98f;
+        int          maxTokens   = 2000;
+    };
+
+    virtual void generate(Request req,
+                          ProgressCallback onProgress,
+                          DoneCallback onDone) = 0;
+
+    virtual Status currentStatus() const = 0;
+};
+
+} // namespace AIMC
