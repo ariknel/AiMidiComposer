@@ -26,6 +26,12 @@ try:
 except Exception as e:
     print(f"[spec] huggingface_hub data failed: {e}")
 
+# accelerate: collect data files for device_map support
+try:
+    datas += collect_data_files("accelerate")
+except Exception as e:
+    print(f"[spec] accelerate data failed: {e}")
+
 # mido: pure Python, tiny, no hook - just list the submodules explicitly
 hiddenimports += [
     "mido",
@@ -102,6 +108,34 @@ hiddenimports += [
     "numpy.random._generator",
 ]
 
+# accelerate: required for HuggingFace model loading optimizations
+hiddenimports += [
+    "accelerate",
+    "accelerate.utils",
+    "accelerate.utils.modeling",
+]
+
+# sympy: required by torch.fx.experimental.symbolic_shapes -> torch.utils._sympy
+# DO NOT exclude this — torch needs it at model load time.
+hiddenimports += [
+    "sympy",
+    "sympy.core",
+    "sympy.core.numbers",
+    "sympy.core.symbol",
+    "sympy.core.expr",
+    "sympy.core.add",
+    "sympy.core.mul",
+    "sympy.core.power",
+    "sympy.core.relational",
+    "sympy.core.singleton",
+    "sympy.logic",
+    "sympy.logic.boolalg",
+    "sympy.sets",
+    "sympy.sets.sets",
+    "sympy.printing",
+    "sympy.printing.str",
+]
+
 # unittest.mock is imported by torch._dispatch.python at module load time.
 # Even though we excluded unittest tests, the stdlib unittest package itself
 # must be present. PyInstaller normally includes stdlib but excludes can
@@ -124,7 +158,7 @@ a = Analysis(
     excludes=[
         # Heavy libs we never use
         'matplotlib', 'pandas', 'PIL', 'Pillow', 'scipy',
-        'sklearn', 'sympy', 'cv2',
+        'sklearn', 'cv2',
         # Notebook / IDE
         'notebook', 'jupyter', 'IPython', 'ipykernel',
         # GUI toolkits

@@ -27,6 +27,14 @@ import traceback
 from pathlib import Path
 from typing import Optional
 
+# CRITICAL: Force the Selector event loop on Windows BEFORE any asyncio import.
+# The default ProactorEventLoop (IOCP) crashes with WinError 64 during model
+# loading when the socket accept loop hits a transient network condition.
+# SelectorEventLoop is stable and fully compatible with uvicorn + FastAPI.
+if sys.platform == "win32":
+    import asyncio
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 # Unbuffered stdout so the host reads progress immediately
 sys.stdout.reconfigure(line_buffering=True)  # type: ignore
 
@@ -132,12 +140,33 @@ def _load_everything(model_dir: Path) -> None:
         emit_load(25.0)
 
         dtype = torch.bfloat16 if _DEVICE == "cuda" else torch.float32
-        _MODEL = AutoModelForCausalLM.from_pretrained(
-            _MODEL_ID,
-            cache_dir=str(model_dir / "hub"),
-            torch_dtype=dtype,
-            low_cpu_mem_usage=True,
-        ).to(_DEVICE)
+        try:
+            _MODEL = AutoModelForCausalLM.from_pretrained(
+                _MODEL_ID,
+                cache_dir=str(model_dir / "hub"),
+                torch_dtype=dtype,
+                low_cpu_mem_usage=True,
+            )
+            emit_load(60.0)
+            if _DEVICE == "cuda":
+                free_vram = torch.cuda.mem_get_info()[0]
+                model_size = sum(p.numel() * p.element_size() for p in _MODEL.parameters())
+                print(f"[DEBUG] VRAM free={round(free_vram/1e9,2)}GB model_size={round(model_size/1e9,2)}GB", flush=True)
+                if free_vram < model_size * 1.1:
+                    emit_error(
+                        "Not enough VRAM to load model.\n"
+                        "Need ~" + str(round(model_size / 1e9, 1)) + " GB free, have "
+                        + str(round(free_vram / 1e9, 1)) + " GB.\n"
+                        "Close other GPU applications and retry."
+                    )
+                    return
+                _MODEL = _MODEL.to(_DEVICE)
+        except (AssertionError, RuntimeError) as e:
+            import traceback as _tb
+            full_tb = _tb.format_exc()
+            print(full_tb, flush=True)
+            emit_error("Model load failed:\n" + full_tb[-600:])
+            return
         _MODEL.eval()
         emit_load(85.0)
 
@@ -173,10 +202,13 @@ def _generate_midi(prompt: str, temperature: float, top_p: float, max_tokens: in
         f"according to the following description: {prompt}"
     )
 
-    input_ids = _TOKENIZER.encode(full_prompt, return_tensors="pt").to(_DEVICE)
+    input_ids = _TOKENIZER.encode(full_prompt, return_tensors="pt")
 
-    # The MIDI vocabulary starts at id >= 128256 (text vocab size).
-    # Generation continues until EOS or max_tokens reached.
+    # Ensure model and inputs are on the same device
+    actual_device = next(_MODEL.parameters()).device
+    print(f"[DEBUG] _DEVICE={_DEVICE} model_device={actual_device}", flush=True)
+    input_ids = input_ids.to(actual_device)
+
     with torch.no_grad():
         out_ids = _MODEL.generate(
             input_ids,
@@ -281,8 +313,10 @@ def build_app():
             try:
                 midi_bytes = _generate_midi(req.prompt, req.temperature, req.top_p, req.max_tokens)
             except Exception as e:
-                traceback.print_exc(file=sys.stderr)
-                return {"success": False, "error": f"{type(e).__name__}: {e}"}
+                import traceback as _tb
+                tb = _tb.format_exc()
+                print(tb, flush=True)
+                return {"success": False, "error": f"{type(e).__name__}: {e}\n\n{tb[-400:]}"}
             meta = _analyse_midi(midi_bytes)
 
             return {
@@ -342,7 +376,8 @@ def main() -> int:
     # Serve HTTP immediately so /healthz works during loading
     import uvicorn
     app = build_app()
-    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
+    # Use asyncio loop explicitly - avoids WinError 64 IOCP proactor crash on Windows
+    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning", loop="asyncio")
     return 0
 
 
