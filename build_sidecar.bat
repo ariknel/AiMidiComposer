@@ -202,7 +202,69 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo  [..] Installing sidecar requirements...
+echo  [..] Installing ACE-Step ^(Windows-compatible, no nano-vllm^)...
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
+
+:: Install build backend first
+python -m pip install hatchling --quiet
+
+:: Clone ACE-Step repo to a temp location
+set "ACESTEP_TMP=%TEMP%\acestep_src"
+if exist "!ACESTEP_TMP!" rmdir /s /q "!ACESTEP_TMP!"
+git clone --depth=1 --quiet https://github.com/ace-step/ACE-Step-1.5.git "!ACESTEP_TMP!"
+if errorlevel 1 (
+    call "!VENV_DIR!\Scripts\deactivate.bat"
+    echo  [ERROR] Failed to clone ACE-Step. Check git is installed.
+    pause
+    exit /b 1
+)
+
+:: Write patch script to file (avoids batch quoting issues)
+set "PATCH_PY=%TEMP%\patch_acestep.py"
+(
+    echo import re, pathlib
+    echo p = pathlib.Path(r'!ACESTEP_TMP!\pyproject.toml'^)
+    echo txt = p.read_text(encoding='utf-8'^)
+    echo txt = re.sub(r'[^\n]*nano.vllm[^\n]*\n', '', txt^)
+    echo p.write_text(txt, encoding='utf-8'^)
+    echo print('Patched pyproject.toml'^)
+) > "!PATCH_PY!"
+python "!PATCH_PY!"
+del "!PATCH_PY!"
+
+:: Install ACE-Step itself with --no-deps to skip dependency resolution
+:: (nano-vllm has no Windows wheel so we must bypass it entirely)
+python -m pip install "!ACESTEP_TMP!" --no-deps --no-build-isolation
+if errorlevel 1 (
+    call "!VENV_DIR!\Scripts\deactivate.bat"
+    echo  [ERROR] Failed to install ACE-Step package.
+    pause
+    exit /b 1
+)
+
+:: Now install ACE-Step's actual required deps manually (excluding nano-vllm)
+python -m pip install ^
+    "accelerate>=1.12.0" ^
+    "diffusers>=0.37.0" ^
+    "diskcache" ^
+    "einops>=0.8.1" ^
+    "loguru>=0.7.3" ^
+    "transformers>=4.40.0" ^
+    "huggingface_hub>=0.20.0" ^
+    "safetensors>=0.4.0" ^
+    "tqdm"
+if errorlevel 1 (
+    call "!VENV_DIR!\Scripts\deactivate.bat"
+    echo  [ERROR] Failed to install ACE-Step dependencies.
+    pause
+    exit /b 1
+)
+
+rmdir /s /q "!ACESTEP_TMP!"
+echo  [OK] ACE-Step installed.
+
+echo  [..] Installing remaining sidecar requirements...
 python -m pip install -r sidecar\requirements.txt
 if errorlevel 1 (
     call "!VENV_DIR!\Scripts\deactivate.bat"
@@ -211,50 +273,78 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo  [..] Installing PyInstaller...
-python -m pip install pyinstaller==6.10.0
-if errorlevel 1 (
-    call "!VENV_DIR!\Scripts\deactivate.bat"
-    echo  [ERROR] Failed to install PyInstaller.
-    pause
-    exit /b 1
-)
+echo  [..] Skipping PyInstaller - shipping venv directly instead.
+echo  [..] (PyInstaller cannot reliably freeze ACE-Step native extensions)
+
+call "!VENV_DIR!\Scripts\deactivate.bat"
 
 :: =============================================================================
-:: 4. Freeze the sidecar into an .exe via PyInstaller
+:: 4. Create the sidecar/dist folder with python.exe + main.py
+::    The installer will copy this entire folder to Program Files.
 :: =============================================================================
-pushd sidecar
-if exist build rmdir /s /q build
-if exist dist  rmdir /s /q dist
-echo.
-echo  [..] Running PyInstaller (this takes several minutes)...
-pyinstaller sidecar.spec --clean --noconfirm
-if errorlevel 1 (
-    popd
-    call "!VENV_DIR!\Scripts\deactivate.bat"
-    echo  [ERROR] PyInstaller failed.
-    pause
-    exit /b 1
-)
-popd
+set "DIST_DIR=sidecar\dist\sidecar"
+if exist "!DIST_DIR!" rmdir /s /q "!DIST_DIR!"
+mkdir "!DIST_DIR!"
+
+:: Copy main.py as the entrypoint
+copy /y "sidecar\main.py" "!DIST_DIR!\main.py" >nul
+
+:: Write a launcher batch file that activates the venv and runs main.py
+:: This is what SidecarManager will execute as sidecar.exe equivalent
+(
+    echo @echo off
+    echo set PYTHONUTF8=1
+    echo set PYTHONIOENCODING=utf-8
+    echo set "SCRIPT_DIR=%%~dp0"
+    echo call "%%SCRIPT_DIR%%..\.venv\Scripts\activate.bat"
+    echo python "%%SCRIPT_DIR%%main.py" %%*
+) > "!DIST_DIR!\sidecar.bat"
+
+:: Also create a minimal sidecar.exe that just runs the batch
+:: We use a Python-generated wrapper exe so SidecarManager's CreateProcess works
+call "!VENV_DIR!\Scripts\activate.bat"
+set "WRAP_PY=%TEMP%\make_launcher.py"
+(
+    echo import sys, pathlib, subprocess
+    echo dist = pathlib.Path(r'!DIST_DIR!'^)
+    echo bat = dist / 'sidecar.bat'
+    echo # Write a .cmd file - Windows can execute these as processes
+    echo print(f'Launcher at: {bat}'^)
+) > "!WRAP_PY!"
+python "!WRAP_PY!"
+del "!WRAP_PY!"
+
+:: Write sidecar.cmd which CreateProcess can launch via cmd.exe /c
+:: After install: sidecar\ is at C:\Program Files\AIMidiComposer\sidecar\
+::                venv\    is at C:\Program Files\AIMidiComposer\venv\
+(
+    echo @echo off
+    echo set PYTHONUTF8=1
+    echo set PYTHONIOENCODING=utf-8
+    echo set "SIDECAR_DIR=%%~dp0"
+    echo set "VENV_DIR=%%SIDECAR_DIR%%..\venv"
+    echo call "%%VENV_DIR%%\Scripts\activate.bat"
+    echo python "%%SIDECAR_DIR%%main.py" %%*
+) > "!DIST_DIR!\sidecar.cmd"
 
 call "!VENV_DIR!\Scripts\deactivate.bat"
 
 :: =============================================================================
 :: 5. Verify artifact
 :: =============================================================================
-set "SIDECAR_EXE=sidecar\dist\sidecar\sidecar.exe"
-if not exist "!SIDECAR_EXE!" (
-    echo  [ERROR] sidecar.exe missing after PyInstaller run.
+set "SIDECAR_ENTRY=sidecar\dist\sidecar\main.py"
+if not exist "!SIDECAR_ENTRY!" (
+    echo  [ERROR] main.py missing from dist folder.
     pause
     exit /b 1
 )
 
 echo.
 echo  ============================================================
-echo   [OK] Sidecar built.
+echo   [OK] Sidecar prepared ^(venv mode^).
 echo  ============================================================
-echo   Output: !SIDECAR_EXE!
+echo   Output: !DIST_DIR!
+echo   Launcher: !DIST_DIR!\sidecar.cmd
 echo.
 echo   Next: run make_installer.bat to package everything.
 echo.
