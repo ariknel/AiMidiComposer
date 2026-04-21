@@ -59,6 +59,17 @@ if not exist "sidecar\dist\venv_b.zip" (
 for %%F in ("sidecar\dist\venv_a.zip") do echo  [OK] venv_a.zip  %%~zF bytes
 for %%F in ("sidecar\dist\venv_b.zip") do echo  [OK] venv_b.zip  %%~zF bytes
 
+:: Create empty placeholder zips for parts c/d if they don't exist
+:: (Inno Setup 5 requires all Source: files exist at compile time)
+if not exist "sidecar\dist\venv_c.zip" (
+    python -c "import zipfile; zipfile.ZipFile('sidecar/dist/venv_c.zip','w').close()"
+    echo  [..] Created empty venv_c.zip placeholder
+)
+if not exist "sidecar\dist\venv_d.zip" (
+    python -c "import zipfile; zipfile.ZipFile('sidecar/dist/venv_d.zip','w').close()"
+    echo  [..] Created empty venv_d.zip placeholder
+)
+
 set "ISCC="
 for %%P in (
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
