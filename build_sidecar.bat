@@ -296,31 +296,6 @@ mkdir "!DIST_DIR!"
 :: Copy main.py as the entrypoint
 copy /y "sidecar\main.py" "!DIST_DIR!\main.py" >nul
 
-:: Write a launcher batch file that activates the venv and runs main.py
-:: This is what SidecarManager will execute as sidecar.exe equivalent
-(
-    echo @echo off
-    echo set PYTHONUTF8=1
-    echo set PYTHONIOENCODING=utf-8
-    echo set "SCRIPT_DIR=%%~dp0"
-    echo call "%%SCRIPT_DIR%%..\.venv\Scripts\activate.bat"
-    echo python "%%SCRIPT_DIR%%main.py" %%*
-) > "!DIST_DIR!\sidecar.bat"
-
-:: Also create a minimal sidecar.exe that just runs the batch
-:: We use a Python-generated wrapper exe so SidecarManager's CreateProcess works
-call "!VENV_DIR!\Scripts\activate.bat"
-set "WRAP_PY=%TEMP%\make_launcher.py"
-(
-    echo import sys, pathlib, subprocess
-    echo dist = pathlib.Path(r'!DIST_DIR!'^)
-    echo bat = dist / 'sidecar.bat'
-    echo # Write a .cmd file - Windows can execute these as processes
-    echo print(f'Launcher at: {bat}'^)
-) > "!WRAP_PY!"
-python "!WRAP_PY!"
-del "!WRAP_PY!"
-
 :: Write sidecar.cmd which CreateProcess can launch via cmd.exe /c
 :: After install: sidecar\ is at C:\Program Files\AIMidiComposer\sidecar\
 ::                venv\    is at C:\Program Files\AIMidiComposer\venv\
@@ -339,9 +314,9 @@ call "!VENV_DIR!\Scripts\deactivate.bat"
 :: =============================================================================
 :: 5. Verify artifact
 :: =============================================================================
-set "SIDECAR_ENTRY=sidecar\dist\sidecar\main.py"
+set "SIDECAR_ENTRY=sidecar\dist\sidecar\sidecar.cmd"
 if not exist "!SIDECAR_ENTRY!" (
-    echo  [ERROR] main.py missing from dist folder.
+    echo  [ERROR] sidecar.cmd missing from dist folder.
     pause
     exit /b 1
 )
