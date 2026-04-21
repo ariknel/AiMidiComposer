@@ -185,15 +185,20 @@ python -m pip install --upgrade pip
 
 echo.
 echo  Pick a PyTorch wheel:
-echo     1) CUDA 12.1 (NVIDIA, recommended for speed)
-echo     2) CPU only  (slower, broadest compatibility)
+echo     1) CUDA 12.1  - NVIDIA GPU  (recommended, fast generation)
+echo     2) CPU only   - No GPU required  (slower, always works)
+echo.
 set /p TORCH_CHOICE="  Enter 1 or 2: "
 if "!TORCH_CHOICE!"=="1" (
-    echo  [..] Installing CUDA 12.1 torch...
-    python -m pip install torch --index-url https://download.pytorch.org/whl/cu121
+    echo  [..] Installing PyTorch CUDA 12.1...
+    python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121 --force-reinstall --quiet
+    if errorlevel 1 (
+        echo  [WARN] CUDA torch failed, falling back to CPU...
+        python -m pip install torch torchaudio --force-reinstall --quiet
+    )
 ) else (
-    echo  [..] Installing CPU-only torch...
-    python -m pip install torch
+    echo  [..] Installing PyTorch CPU...
+    python -m pip install torch torchaudio --force-reinstall --quiet
 )
 if errorlevel 1 (
     call "!VENV_DIR!\Scripts\deactivate.bat"
@@ -201,6 +206,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+python -c "import torch; print(f'  [OK] torch {torch.__version__} device=cuda:{torch.cuda.is_available()}')"
 
 echo  [..] Installing ACE-Step ^(Windows-compatible, no nano-vllm^)...
 set PYTHONUTF8=1
@@ -297,16 +303,15 @@ mkdir "!DIST_DIR!"
 copy /y "sidecar\main.py" "!DIST_DIR!\main.py" >nul
 
 :: Write sidecar.cmd which CreateProcess can launch via cmd.exe /c
-:: After install: sidecar\ is at C:\Program Files\AIMidiComposer\sidecar\
-::                venv\    is at C:\Program Files\AIMidiComposer\venv\
-:: Use python.exe directly - avoids activate.bat issues when launched from C++
+:: Hardcode the installed venv path - relative path resolution with %~dp0
+:: can fail when called from C++ CreateProcess with no shell context
 (
     echo @echo off
     echo set PYTHONUTF8=1
     echo set PYTHONIOENCODING=utf-8
-    echo set "SIDECAR_DIR=%%~dp0"
-    echo set "PYTHON_EXE=%%SIDECAR_DIR%%..\venv\Scripts\python.exe"
-    echo "%%PYTHON_EXE%%" "%%SIDECAR_DIR%%main.py" %%*
+    echo set "PYTHON_EXE=C:\Program Files\AIMidiComposer\venv\Scripts\python.exe"
+    echo set "MAIN_PY=C:\Program Files\AIMidiComposer\sidecar\main.py"
+    echo "%%PYTHON_EXE%%" "%%MAIN_PY%%" %%*
 ) > "!DIST_DIR!\sidecar.cmd"
 
 call "!VENV_DIR!\Scripts\deactivate.bat"

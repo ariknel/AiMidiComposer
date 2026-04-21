@@ -370,10 +370,11 @@ void PluginEditor::onBackendStatus(const InferenceBackend::StatusUpdate& u)
             m_progressBar.setVisible(true);
             break;
         case S::Ready:
-            showStatusLine("Ready  |  CUDA");
+            showStatusLine(u.message.isEmpty() ? juce::String("Ready") : u.message);
             m_input.setPlaceholder("Describe music, ask for a bassline, variation, continuation...");
             m_progress = 1.0;
             m_progressBar.setVisible(false);
+            m_readyStatusMsg = u.message;  // remember for setGenerating
             break;
         case S::Failed: {
             auto line1 = u.message.upToFirstOccurrenceOf("\n", false, false);
@@ -423,7 +424,7 @@ void PluginEditor::setGenerating(bool on)
     m_isGenerating = on;
     m_input.setSendEnabled(!on && m_isModelReady);
     if (on) showStatusLine("Generating...");
-    else    showStatusLine(m_isModelReady ? juce::String("Ready  |  CUDA") : juce::String("Idle"));
+    else    showStatusLine(m_isModelReady ? (m_readyStatusMsg.isEmpty() ? juce::String("Ready") : m_readyStatusMsg) : juce::String("Idle"));
 }
 
 // ============================================================

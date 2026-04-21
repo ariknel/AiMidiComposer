@@ -31,6 +31,7 @@ private:
     std::atomic<Status>         m_status { Status::NotStarted };
     StatusCallback              m_statusCb;
     std::atomic<int>            m_sidecarPort { 0 };  // set atomically after launch, read from any thread
+    juce::String                m_deviceLabel;         // "CUDA" or "CPU" from INFO device= line
 
     juce::String baseUrl() const {
         return "http://127.0.0.1:" + juce::String(m_sidecarPort.load());

@@ -49,6 +49,9 @@ void HttpSidecarBackend::start(StatusCallback onStatus)
             } else if (line.startsWith("PROGRESS load ")) {
                 float pct = line.fromFirstOccurrenceOf("PROGRESS load ", false, false).getFloatValue();
                 updateStatus(Status::LoadingModel, "Loading model into memory...", pct / 100.f);
+            } else if (line.startsWith("INFO device=")) {
+                // Store device label so Ready message shows CPU or CUDA correctly
+                m_deviceLabel = line.fromFirstOccurrenceOf("INFO device=", false, false).trim().toUpperCase();
             } else if (line.startsWith("READY")) {
                 // Uvicorn needs ~500-1000ms after printing READY to fully bind its socket.
                 // Probe healthz with retries before declaring Ready to the UI.
@@ -62,7 +65,8 @@ void HttpSidecarBackend::start(StatusCallback onStatus)
                                 .withConnectionTimeoutMs(2000)
                                 .withStatusCode(&hCode));
                         if (stream && hCode == 200) {
-                            updateStatus(Status::Ready, "Model ready.", 1.f);
+                            auto label = m_deviceLabel.isEmpty() ? juce::String("Ready") : ("Ready  |  " + m_deviceLabel);
+                            updateStatus(Status::Ready, label, 1.f);
                             return;
                         }
                         juce::Thread::sleep(500);
@@ -207,7 +211,7 @@ void HttpSidecarBackend::generate(Request req,
         auto stream = url.createInputStream(
             juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inPostData)
                 .withExtraHeaders("Content-Type: application/json")
-                .withConnectionTimeoutMs(10 * 60 * 1000)
+                .withConnectionTimeoutMs(30 * 60 * 1000)   // 30 min - CPU can be slow
                 .withStatusCode(&statusCode));
 
         if (! stream) {

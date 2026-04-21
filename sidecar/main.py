@@ -74,10 +74,15 @@ def _load_everything(model_dir):
 
         emit_load(20.0)
 
+        # CPU needs float32; CUDA can use bfloat16 for speed/memory
+        torch_dtype = torch.bfloat16 if _DEVICE == "cuda" else torch.float32
+        print(f"[LOAD] device={_DEVICE} dtype={torch_dtype}", flush=True)
+
         # Load - first run downloads ~4GB weights automatically
         _PIPELINE = ACEStepPipeline.from_pretrained(
             model_name="ace-step-v1.5-base",
             device=_DEVICE,
+            torch_dtype=torch_dtype,
         )
 
         emit_download(100.0)

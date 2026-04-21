@@ -79,6 +79,7 @@ private:
     // --- State ---
     bool             m_isGenerating  = false;
     bool             m_isModelReady  = false;
+    juce::String     m_readyStatusMsg;        // "Ready | CUDA" or "Ready | CPU"
     int              m_activePanel   = 0;   // 0=none 1=settings 2=log
     juce::String     m_lastStatusText;
     bool             m_lastStatusIsError = false;
